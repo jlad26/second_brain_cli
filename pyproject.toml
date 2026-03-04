@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cli_second_brain"
+version = "0.1.0"
+description = "Hybrid semantic search CLI for Obsidian vaults using Qdrant and OpenAI"
+authors = [{name="Jon Anwyl", email="jon.anwyl@gmail.com"}]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "qdrant-client>=1.9",
+    "openai>=1.0.0",
+    "fastembed>=0.2",
+    "python-dotenv>=1.2.2",
+    "python-frontmatter>=0.5",
+    "typer[all]>=0.10"
+]
+
+[project.scripts]
+second-brain = "cli_second_brain.cli:app"
