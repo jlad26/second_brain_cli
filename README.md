@@ -1,4 +1,4 @@
-# Installation
+# Prerequisites
 
 ## Pyenv
 
@@ -38,21 +38,21 @@ eval "$(pyenv virtualenv-init -)"
 
 Reload shell: `source ~/.bashrc`
 
-## Virtual environment
+Install python: `pyenv install 3.12.3`
 
-`pyenv install 3.12.3`
+# Build
 
 Move to project folder, then:
 
 ```
-pyenv local 3.12.3  # sets 3.12 for this project
-python --version     # should show 3.12.3
+pyenv local 3.12  # sets 3.12 for this project
+python --version     # should show 3.12.x
 ```
 
 ```
 python -m venv .venv
 source .venv/bin/activate
-python --version   # should be 3.12.3
+python --version   # should be 3.12.x
 ```
 
 ## Create application
@@ -62,3 +62,15 @@ Install build tools: `pip install --upgrade pip setuptools wheel build`
 Build wheel: `python -m build`
 
 Install cli: `pip install ./dist/cli_second_brain-0.1.0-py3-none-any.whl`
+
+# Installation
+
+Set pythoh version to global access: `pyenv global 3.12`
+
+Install pipx: `pip install --user pipx`
+
+Restart terminal, then: `pipx ensurepath`
+
+Install CLI:
+
+`pipx install git+ssh://git@github-cli_second_brain/jlad26/second_brain_cli.git`
