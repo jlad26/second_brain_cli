@@ -3,13 +3,14 @@ import os
 import json
 
 from cli_second_brain.core import (
+    delete_collection,
     embed_all_notes,
-    search_notes,
-    search_notes_graph,
-    get_links,
     get_backlinks,
     get_connected,
-    delete_collection
+    get_links,
+    search_by_filename_exact,
+    search_notes,
+    search_notes_graph, 
 )
 
 app = typer.Typer(
@@ -85,6 +86,14 @@ def search_graph(
         folder=folder,
         tags=tags
     )
+    typer.echo(json.dumps(matches, indent=2))
+    
+@app.command(help="Find notes by exact filename")
+def filename(
+    name: str,
+    folder: list[str] = typer.Option(None, help="Restrict search to folders")
+):
+    matches = search_by_filename_exact(name, folders=folder)
     typer.echo(json.dumps(matches, indent=2))
 
 # ==========================

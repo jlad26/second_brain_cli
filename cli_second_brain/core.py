@@ -3,6 +3,7 @@ import json
 import os
 import uuid
 import re
+from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
@@ -203,6 +204,11 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
     # ---------------------------------------
 
     existing_hashes = load_index_cache()
+    
+    # Handle the scenario of a deleted collection.
+    if COLLECTION_NAME not in [c.name for c in qdrant.get_collections().collections]:
+        print("⚠ Qdrant collection missing, clearing local index cache")
+        existing_hashes = {}
 
     # ---------------------------------------
     # Scan vault once
@@ -220,10 +226,10 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
     # Build filename -> path index
     # ---------------------------------------
 
-    filename_index = {
-        p.stem: p
-        for p in note_paths
-    }
+    filename_index = defaultdict(list)
+
+    for p in note_paths:
+        filename_index[p.stem].append(p)
 
     notes_to_embed = []
 
@@ -250,9 +256,9 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 
         for lname in link_names:
 
-            candidate = filename_index.get(lname)
+            candidates = filename_index.get(lname, [])
 
-            if candidate:
+            for candidate in candidates:
                 link_uuids.append(note_uuid(candidate))
 
         relative_path = note_path.relative_to(NOTES_DIR)
@@ -638,6 +644,42 @@ def search_notes_graph(
 
     # Slice final results only if top_k > 0
     return reranked if top_k == 0 else reranked[:top_k]
+
+
+def search_by_filename_exact(
+    filename: str,
+    folders: list[str] | None = None
+):
+    """
+    Return notes whose filename exactly matches the given name.
+
+    Args:
+        filename: exact note name (without .md)
+        folders: optional list of folders to restrict search
+
+    Returns:
+        list of matches
+    """
+
+    results = []
+
+    for path in Path(NOTES_DIR).rglob("*.md"):
+
+        if path.name.startswith("."):
+            continue
+
+        relative = path.relative_to(NOTES_DIR)
+
+        # folder filter
+        if folders:
+            if not any(str(relative.parent).startswith(f) for f in folders):
+                continue
+
+        if path.stem.lower() == filename.lower():
+
+            results.append(f"{str(relative.parent)}/{str(relative)}")
+
+    return results
 
 
 def delete_collection():
