@@ -46,7 +46,7 @@ CACHE_FILE = os.getenv("SB_QDRANT_CACHE_FILE", "")
 OPENAI_API_KEY = os.getenv("SB_QDRANT_OPENAI_API_KEY")
 NOTES_DIR = os.getenv("SB_QDRANT_NOTES_DIR", "")
 EMBED_MODEL = os.getenv("SB_QDRANT_EMBED_MODEL", "")
-BATCH_SIZE = int(os.getenv("SB_QDRANT_BATCH_SIZE", 1))
+BATCH_SIZE = int(os.getenv("SB_QDRANT_BATCH_SIZE", 64))
 GRAPH_NEIGHBOR_LIMIT = int(os.getenv("SB_GRAPH_NEIGHBOR_LIMIT", 20))
 
 os.environ["HF_TOKEN"] = SB_QDRANT_HF_TOKEN
@@ -175,8 +175,6 @@ def get_embeddings(texts):
             embeddings[idx] = vector
             embedding_cache[file_hash(texts[idx])] = vector
 
-    save_cache(embedding_cache)
-
     return embeddings
 
 
@@ -186,38 +184,86 @@ def get_embeddings(texts):
 
 def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 
-    # Exclude hidden folders and files
+    # ---------------------------------------
+    # Load existing UUID -> hash from Qdrant
+    # ---------------------------------------
+
+    existing_hashes = {}
+
+    scroll_offset = None
+
+    while True:
+        points, scroll_offset = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=1000,
+            offset=scroll_offset,
+            with_payload=["uuid", "hash"],
+            with_vectors=False
+        )
+
+        for p in points:
+            if p.payload:
+                existing_hashes[p.payload["uuid"]] = p.payload.get("hash")
+
+        if scroll_offset is None:
+            break
+
+    # ---------------------------------------
+    # Scan vault once
+    # ---------------------------------------
+
     note_paths = [
         p for p in Path(NOTES_DIR).rglob("*.md")
-        if not any(part.startswith(".") for part in p.parts)  # exclude any folder starting with .
-        and not p.name.startswith(".")                        # exclude files starting with .
+        if not any(part.startswith(".") for part in p.parts)
+        and not p.name.startswith(".")
     ]
+
+    print(f"Vault scan found {len(note_paths)} markdown files")
+
+    # ---------------------------------------
+    # Build filename -> path index
+    # ---------------------------------------
+
+    filename_index = {
+        p.stem: p
+        for p in note_paths
+    }
 
     notes_to_embed = []
 
+    # ---------------------------------------
+    # Process notes
+    # ---------------------------------------
+
     for note_path in note_paths:
+
         note = frontmatter.load(str(note_path))
         text = note.content.strip()
+
         if not text:
             continue
 
         note_id = note_uuid(note_path)
         current_hash = file_hash(text)
 
-        existing = qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[note_id])
-        if existing and not force_update:
-            payload = existing[0].payload
-            if payload is not None and payload.get("hash") == current_hash:
+        if not force_update:
+            existing_hash = existing_hashes.get(note_id)
+            if existing_hash == current_hash:
                 continue
 
-        # Extract links
+        # ---------------------------------------
+        # Resolve links using filename index
+        # ---------------------------------------
+
         link_names = extract_links(text)
         link_uuids = []
+
         for lname in link_names:
-            # search for matching file in vault
-            candidates = list(Path(NOTES_DIR).rglob(f"{lname}.md"))
-            if candidates:
-                link_uuids.append(note_uuid(candidates[0]))
+
+            candidate = filename_index.get(lname)
+
+            if candidate:
+                link_uuids.append(note_uuid(candidate))
 
         relative_path = note_path.relative_to(NOTES_DIR)
 
@@ -236,9 +282,13 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
             }
         })
 
-    print(f"Found {len(notes_to_embed)} notes to embed/update")
+    print(f"{len(notes_to_embed)} notes require embedding")
 
     updated = 0
+
+    # ---------------------------------------
+    # Embed + upsert in batches
+    # ---------------------------------------
 
     for i in range(0, len(notes_to_embed), batch_size):
 
@@ -268,6 +318,11 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
         )
 
         updated += len(points)
+
+        print(f"Embedded {updated}/{len(notes_to_embed)}")
+
+    # Save embedding cache once
+    save_cache(embedding_cache)
 
     return updated
 
