@@ -19,7 +19,8 @@ from qdrant_client.http.models import (
     Prefetch,
     SparseVector,
     SparseVectorParams,
-    VectorParams
+    VectorParams,
+    Range
 )
 
 from openai import OpenAI
@@ -32,6 +33,7 @@ from fastembed import SparseTextEmbedding
 current_file_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_file_dir)
 env_file_path = os.path.join(parent_dir, ".env")
+
 if os.path.exists(env_file_path):
     from dotenv import load_dotenv
     load_dotenv()
@@ -45,6 +47,7 @@ OPENAI_API_KEY = os.getenv("SB_QDRANT_OPENAI_API_KEY")
 NOTES_DIR = os.getenv("SB_QDRANT_NOTES_DIR", "")
 EMBED_MODEL = os.getenv("SB_QDRANT_EMBED_MODEL", "")
 BATCH_SIZE = int(os.getenv("SB_QDRANT_BATCH_SIZE", 1))
+GRAPH_NEIGHBOR_LIMIT = int(os.getenv("SB_GRAPH_NEIGHBOR_LIMIT", 20))
 
 os.environ["HF_TOKEN"] = SB_QDRANT_HF_TOKEN
 
@@ -61,7 +64,6 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
 
-
 # ==========================
 # COLLECTION SETUP
 # ==========================
@@ -72,46 +74,42 @@ if COLLECTION_NAME not in collections:
 
     qdrant.create_collection(
         collection_name=COLLECTION_NAME,
-
         vectors_config=VectorParams(
             size=1536,
             distance=Distance.COSINE
         ),
-
         sparse_vectors_config={
             "text": SparseVectorParams()
         }
     )
-    
-    # metadata indexes
-    qdrant.create_payload_index(
-        COLLECTION_NAME,
-        "status",
-        PayloadSchemaType.KEYWORD
-    )
 
-    qdrant.create_payload_index(
-        COLLECTION_NAME,
-        "type",
-        PayloadSchemaType.KEYWORD
-    )
-
-    qdrant.create_payload_index(
-        COLLECTION_NAME,
-        "tags",
-        PayloadSchemaType.KEYWORD
-    )
-
+    qdrant.create_payload_index(COLLECTION_NAME, "status", PayloadSchemaType.KEYWORD)
+    qdrant.create_payload_index(COLLECTION_NAME, "type", PayloadSchemaType.KEYWORD)
+    qdrant.create_payload_index(COLLECTION_NAME, "tags", PayloadSchemaType.KEYWORD)
+    qdrant.create_payload_index(COLLECTION_NAME, "folder", PayloadSchemaType.KEYWORD)
+    qdrant.create_payload_index(COLLECTION_NAME, "links", PayloadSchemaType.KEYWORD)
+    qdrant.create_payload_index(COLLECTION_NAME, "filename", PayloadSchemaType.KEYWORD)
+    qdrant.create_payload_index(COLLECTION_NAME, "uuid", PayloadSchemaType.KEYWORD)
 
 # ==========================
 # HELPERS
 # ==========================
 
-LINK_PATTERN = r"\[\[([^\]|]+)"
+LINK_PATTERN = r"\[\[([^\]]+)\]\]"
 
 
 def extract_links(text: str):
-    return re.findall(LINK_PATTERN, text)
+
+    matches = re.findall(LINK_PATTERN, text)
+
+    cleaned = []
+
+    for m in matches:
+        m = m.split("|")[0]
+        m = m.split("/")[-1]
+        cleaned.append(m.strip())
+
+    return cleaned
 
 
 def file_hash(text: str):
@@ -119,11 +117,18 @@ def file_hash(text: str):
 
 
 def note_uuid(path: Path):
-    """Deterministic UUID based on file path"""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, str(path)))
 
+
+def resolve_uuids_to_filenames(uuids: list[str]):
+    if not uuids:
+        return []
+    points, _ = qdrant.scroll(collection_name=COLLECTION_NAME, scroll_filter=None, limit=len(uuids))
+    uuid_to_filename = {r.payload["uuid"]: r.payload["filename"] for r in points if r.payload}
+    return [uuid_to_filename.get(u, u) for u in uuids]
+
 # ==========================
-# EMBEDDING CACHING
+# EMBEDDING CACHE
 # ==========================
 
 def load_cache():
@@ -137,13 +142,14 @@ def save_cache(cache):
     with open(CACHE_FILE, "w") as f:
         json.dump(cache, f)
 
+
 embedding_cache = load_cache()
+
 
 def get_embeddings(texts):
 
     new_texts = []
     new_indices = []
-
     embeddings: list[Optional[list[float]]] = [None] * len(texts)
 
     for i, text in enumerate(texts):
@@ -151,11 +157,8 @@ def get_embeddings(texts):
         h = file_hash(text)
 
         if h in embedding_cache:
-
             embeddings[i] = embedding_cache[h]
-
         else:
-
             new_texts.append(text)
             new_indices.append(i)
 
@@ -169,14 +172,13 @@ def get_embeddings(texts):
         for idx, emb in zip(new_indices, response.data):
 
             vector = emb.embedding
-
             embeddings[idx] = vector
-
             embedding_cache[file_hash(texts[idx])] = vector
 
     save_cache(embedding_cache)
 
     return embeddings
+
 
 # ==========================
 # EMBEDDING PIPELINE
@@ -184,48 +186,52 @@ def get_embeddings(texts):
 
 def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 
-    note_paths = list(Path(NOTES_DIR).rglob("*.md"))
+    # Exclude hidden folders and files
+    note_paths = [
+        p for p in Path(NOTES_DIR).rglob("*.md")
+        if not any(part.startswith(".") for part in p.parts)  # exclude any folder starting with .
+        and not p.name.startswith(".")                        # exclude files starting with .
+    ]
 
     notes_to_embed = []
 
     for note_path in note_paths:
-
         note = frontmatter.load(str(note_path))
-
         text = note.content.strip()
-
         if not text:
             continue
 
         note_id = note_uuid(note_path)
-
         current_hash = file_hash(text)
 
-        existing = qdrant.retrieve(
-            collection_name=COLLECTION_NAME,
-            ids=[note_id]
-        )
-
+        existing = qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[note_id])
         if existing and not force_update:
-
             payload = existing[0].payload
             if payload is not None and payload.get("hash") == current_hash:
                 continue
 
-        links = extract_links(text)
+        # Extract links
+        link_names = extract_links(text)
+        link_uuids = []
+        for lname in link_names:
+            # search for matching file in vault
+            candidates = list(Path(NOTES_DIR).rglob(f"{lname}.md"))
+            if candidates:
+                link_uuids.append(note_uuid(candidates[0]))
+
+        relative_path = note_path.relative_to(NOTES_DIR)
 
         notes_to_embed.append({
-
             "id": note_id,
-
             "text": text,
-
             "payload": {
-                "filename": str(note_path),
+                "filename": str(relative_path),
+                "uuid": note_id,
+                "folder": str(relative_path.parent),
                 "status": note.get("status", "active"),
                 "type": note.get("type", "idea"),
                 "tags": note.get("tags", []),
-                "links": links,
+                "links": link_uuids,
                 "hash": current_hash
             }
         })
@@ -240,10 +246,7 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 
         texts = [n["text"] for n in batch]
 
-        # Dense embeddings
         dense_vectors = get_embeddings(texts)
-
-        # Sparse embeddings
         sparse_vectors = list(sparse_model.embed(texts))
 
         points = []
@@ -266,8 +269,6 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 
         updated += len(points)
 
-        print(f"Embedded batch {i} → {i + len(batch) - 1}")
-
     return updated
 
 
@@ -275,100 +276,222 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 # FILTER BUILDER
 # ==========================
 
-def build_filter(include_archived=False, type_filter=None):
-
+def build_filter(type_filter=None, status=None, folder=None, tags=None):
     conditions = []
 
-    if not include_archived:
-
-        conditions.append(
-            FieldCondition(
-                key="status",
-                match=MatchValue(value="active")
-            )
-        )
-
+    if status:
+        conditions.append(FieldCondition(key="status", match=MatchValue(value=status[0])) if len(status) == 1 else None)
     if type_filter:
+        conditions.append(FieldCondition(key="type", match=MatchValue(value=type_filter)))
+    if folder:
+        conditions.append(FieldCondition(key="folder", match=MatchValue(value=folder[0])) if len(folder) == 1 else None)
+    if tags:
+        conditions.append(FieldCondition(key="tags", match=MatchValue(value=tags[0])) if len(tags) == 1 else None)
 
-        conditions.append(
-            FieldCondition(
-                key="type",
-                match=MatchValue(value=type_filter)
-            )
-        )
-
+    conditions = [c for c in conditions if c is not None]
     if not conditions:
         return None
-
     return Filter(must=conditions)
 
 
 # ==========================
-# HYBRID SEARCH
+# SEARCH
 # ==========================
 
-def search_notes(
-    query,
-    top_k=5,
-    include_archived=False,
-    type_filter=None,
-    min_score=None
-):
-
+def search_notes(query, top_k=5, min_score=None, include_content=False, **filters):
     query_emb = openai_client.embeddings.create(
         input=query,
         model=EMBED_MODEL
     ).data[0].embedding
 
     sparse_query = list(sparse_model.embed([query]))[0]
-    
     sparse_vector = SparseVector(
         indices=list(sparse_query.indices),
         values=list(sparse_query.values)
     )
 
-    payload_filter = build_filter(
-        include_archived=include_archived,
-        type_filter=type_filter
-    )
+    payload_filter = build_filter(**filters)
 
     results = qdrant.query_points(
-
         collection_name=COLLECTION_NAME,
-
         prefetch=[
-            Prefetch(
-                query=query_emb,
-                using=""
-            ),
-            Prefetch(
-                query=sparse_vector,
-                using="text"
-            )
+            Prefetch(query=query_emb, using=""),
+            Prefetch(query=sparse_vector, using="text")
         ],
-        query=FusionQuery(
-            fusion=Fusion.RRF
-        ),
+        query=FusionQuery(fusion=Fusion.RRF),
         limit=top_k * 2,
         query_filter=payload_filter
     )
 
     hits = results.points
-
     if min_score:
         hits = [h for h in hits if h.score >= min_score]
-
     hits = hits[:top_k]
 
-    return [
-        {
+    output = []
+    for h in hits:
+        if not h.payload:
+            continue
+
+        entry = {
             "filename": h.payload["filename"],
+            "uuid": h.payload.get("uuid"),
             "score": h.score,
             "type": h.payload.get("type"),
             "status": h.payload.get("status"),
             "tags": h.payload.get("tags"),
             "links": h.payload.get("links")
         }
-        for h in hits
-        if h.payload is not None
+
+        if include_content:
+            file_path = Path(NOTES_DIR) / h.payload["filename"]
+            if file_path.exists():
+                entry["note_content"] = file_path.read_text(encoding="utf-8")
+            else:
+                entry["note_content"] = None
+
+        output.append(entry)
+
+    return output
+
+
+# ==========================
+# GRAPH
+# ==========================
+
+def get_links(note_uuid, status=None, folder=None, tags=None, limit=100):
+    payload_filter = build_filter(status=status, folder=folder, tags=tags)
+    payload_filter = Filter(
+        must=[FieldCondition(key="uuid", match=MatchValue(value=note_uuid))],
+        should=[payload_filter] if payload_filter else None
+    )
+    points, _ = qdrant.scroll(collection_name=COLLECTION_NAME, scroll_filter=payload_filter, limit=limit)
+    links = set()
+    for r in points:
+        if r.payload and "links" in r.payload:
+            links.update(r.payload["links"])  # now UUIDs
+    return list(links)
+
+def get_backlinks(note_uuid, status=None, folder=None, tags=None, limit=100):
+    payload_filter = build_filter(status=status, folder=folder, tags=tags)
+    payload_filter = Filter(
+        must=[FieldCondition(key="links", match=MatchValue(value=note_uuid))],
+        should=[payload_filter] if payload_filter else None
+    )
+    points, _ = qdrant.scroll(collection_name=COLLECTION_NAME, scroll_filter=payload_filter, limit=limit)
+    return [r.payload["uuid"] for r in points if r.payload]
+
+def get_connected(note_name, status=None, folder=None, tags=None):
+    return {
+        "outgoing": get_links(note_name, status=status, folder=folder, tags=tags),
+        "incoming": get_backlinks(note_name, status=status, folder=folder, tags=tags)
+    }
+
+def get_graph_neighbors(note_name, status=None, folder=None, tags=None, limit=None):
+    """
+    Returns all graph neighbors (links + backlinks) respecting filters.
+    """
+    if limit is None:
+        limit = GRAPH_NEIGHBOR_LIMIT
+
+    neighbors = set()
+    neighbors.update(get_links(note_name, status=status, folder=folder, tags=tags, limit=limit))
+    neighbors.update(get_backlinks(note_name, status=status, folder=folder, tags=tags, limit=limit))
+    return list(neighbors)
+
+def graph_rerank(
+    results, 
+    boost=0.05, 
+    expand=False, 
+    status=None, 
+    folder=None, 
+    tags=None
+):
+    # Use UUID as key
+    scores = {r["uuid"]: r["score"] for r in results}
+    payloads = {r["uuid"]: r for r in results}
+
+    for r in results:
+        note_id = r["uuid"]
+        neighbors = get_graph_neighbors(note_id, status=status, folder=folder, tags=tags)
+
+        for n in neighbors:
+            if n in scores:
+                # boost existing neighbor
+                scores[n] += boost
+            elif expand:
+                # fetch neighbor by UUID
+                existing = qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[n])
+                if existing and existing[0].payload:
+                    scores[n] = 0
+                    payloads[n] = {
+                        "filename": existing[0].payload.get("filename", ""),
+                        "score": 0,
+                        "uuid": n,
+                        "type": existing[0].payload.get("type"),
+                        "status": existing[0].payload.get("status"),
+                        "tags": existing[0].payload.get("tags", []),
+                        "links": existing[0].payload.get("links", [])
+                    }
+
+    # Reconstruct sorted list
+    reranked = [
+        payloads[uid] for uid, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)
     ]
+    return reranked
+
+
+def search_notes_graph(
+    query,
+    top_k=5,
+    graph_boost=0.05,
+    graph_expand=False,
+    min_score=None,
+    include_content=False,
+    **filters
+):
+    # initial search
+    results = search_notes(
+        query=query,
+        top_k=top_k * 3,
+        min_score=min_score,
+        include_content=include_content,
+        **filters
+    )
+
+    # rerank and optionally expand neighbors
+    reranked = graph_rerank(
+        results,
+        boost=graph_boost,
+        expand=graph_expand,
+        **filters
+    )
+
+    # fetch file content for any neighbors added via expand
+    if include_content:
+        for r in reranked:
+            if "note_content" not in r:
+                file_path = Path(NOTES_DIR) / r["filename"]
+                if file_path.exists():
+                    r["note_content"] = file_path.read_text(encoding="utf-8")
+                else:
+                    r["note_content"] = None
+
+    # convert neighbor links UUIDs to filenames for CLI
+    for r in reranked:
+        if "links" in r:
+            r["links"] = resolve_uuids_to_filenames(r["links"])
+
+    return reranked[:top_k]
+
+
+def delete_collection():
+
+    collections = [c.name for c in qdrant.get_collections().collections]
+
+    if COLLECTION_NAME not in collections:
+        return False
+
+    qdrant.delete_collection(collection_name=COLLECTION_NAME)
+
+    return True

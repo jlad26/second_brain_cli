@@ -1,65 +1,131 @@
-# second_brain_cli/cli.py
 import typer
 import os
 import json
-    
-from cli_second_brain.core import embed_all_notes, search_notes
 
-app = typer.Typer(help="Second-brain CLI using Qdrant and OpenAI embeddings")
+from cli_second_brain.core import (
+    embed_all_notes,
+    search_notes,
+    search_notes_graph,
+    get_links,
+    get_backlinks,
+    get_connected,
+    delete_collection
+)
 
-@app.command()
+app = typer.Typer(
+    help="Second-brain CLI: manage and search your Obsidian vault with Qdrant embeddings",
+    no_args_is_help=True
+)
+
+# ==========================
+# EMBED
+# ==========================
+@app.command(help="Embed or update all notes in the vault")
 def embed(
     force: bool = typer.Option(False, help="Re-embed all notes even if unchanged"),
     batch_size: int = typer.Option(None, help="Override batch size for embedding")
 ):
     """
-    Embed / update all notes in the second brain.
+    Embed or update all notes in your vault.
+
+    Steps:
+    1. Scan all Markdown notes in your vault.
+    2. Compute embeddings using OpenAI and sparse embedding model.
+    3. Upsert embeddings into the Qdrant collection.
+    4. Skip notes that haven't changed unless --force is used.
     """
     final_batch_size = batch_size if batch_size is not None else int(os.getenv("SB_QDRANT_BATCH_SIZE", 1))
     updated = embed_all_notes(batch_size=final_batch_size, force_update=force)
     typer.echo(f"✅ Updated {updated} notes (batch size={final_batch_size})")
 
-@app.command()
+# ==========================
+# SEARCH
+# ==========================
+@app.command(help="Search notes by semantic similarity with optional filters")
 def search(
     query: str,
-    top_k: int = typer.Option(5, help="Number of results to return"),
-    type_filter: str = typer.Option(None, help="Filter results by note type"),
-    min_score: float = typer.Option(None, help="Minimum similarity score (0–1) threshold"),
-    json_output: bool = typer.Option(True, help="Output results as JSON")
+    top_k: int = typer.Option(5, help="Maximum number of results"),
+    min_score: float = typer.Option(None, help="Minimum similarity score threshold"),
+    status: list[str] = typer.Option(None, help="Filter by note status (can provide multiple)"),
+    folder: list[str] = typer.Option(None, help="Filter by folder(s) of the notes"),
+    tags: list[str] = typer.Option(None, help="Filter by tags (can provide multiple)"),
+    include_content: bool = typer.Option(False, help="Include the full note content in the results")
 ):
-    """
-    Search notes by query.
-
-    Options:
-    --top-k : Maximum number of results
-    --type-filter : Filter by note type (e.g., project, idea)
-    --min-score : Minimum similarity score threshold
-    --json-output : Output results as JSON string
-    """
     matches = search_notes(
         query=query,
         top_k=top_k,
-        type_filter=type_filter,
-        min_score=min_score
+        min_score=min_score,
+        status=status,
+        folder=folder,
+        tags=tags,
+        include_content=include_content
     )
+    typer.echo(json.dumps(matches, indent=2))
 
-    if not matches:
-        if json_output:
-            typer.echo(json.dumps([]))  # return empty JSON array
-        else:
-            typer.echo("No matches found.")
-        return
+@app.command(name="search-graph", help="Graph-boosted semantic search with optional filters")
+def search_graph(
+    query: str,
+    top_k: int = typer.Option(5, help="Maximum number of results"),
+    graph_boost: float = typer.Option(0.05, help="Score boost for graph neighbors"),
+    status: list[str] = typer.Option(None, help="Filter by note status"),
+    folder: list[str] = typer.Option(None, help="Filter by folder(s)"),
+    tags: list[str] = typer.Option(None, help="Filter by tags"),
+    min_score: float = typer.Option(None, help="Minimum similarity score for the initial semantic search"),
+    graph_expand: bool = typer.Option(False, help="Include neighbors not in initial results; they appear at the bottom"),
+    include_content: bool = typer.Option(False, help="Include the full note content in the results")
+):
+    matches = search_notes_graph(
+        query=query,
+        top_k=top_k,
+        graph_boost=graph_boost,
+        graph_expand=graph_expand,
+        min_score=min_score,
+        include_content=include_content,
+        status=status,
+        folder=folder,
+        tags=tags
+    )
+    typer.echo(json.dumps(matches, indent=2))
 
-    if json_output:
-        # Convert all matches to JSON string
-        typer.echo(json.dumps(matches, indent=2))
+# ==========================
+# LINKS / BACKLINKS / GRAPH
+# ==========================
+@app.command(help="Show all outgoing links from a note")
+def links(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
+    typer.echo(json.dumps(get_links(note, status=status, folder=folder, tags=tags), indent=2))
+
+@app.command(help="Show all backlinks to a note")
+def backlinks(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
+    typer.echo(json.dumps(get_backlinks(note, status=status, folder=folder, tags=tags), indent=2))
+
+@app.command(help="Show both links and backlinks for a note")
+def graph(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
+    typer.echo(json.dumps(get_connected(note, status=status, folder=folder, tags=tags), indent=2))
+
+# ==========================
+# DELETE COLLECTION
+# ==========================
+@app.command(name="delete-collection", help="Delete the entire Qdrant collection")
+def delete_collection_cmd(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt")
+):
+    """
+    Permanently delete the Qdrant collection.
+
+    WARNING: This will remove all embeddings and metadata in the collection.
+    Use --yes to skip the interactive confirmation.
+    """
+    if not yes:
+        confirm = typer.confirm("This will permanently delete the entire collection. Continue?")
+        if not confirm:
+            typer.echo("Aborted.")
+            raise typer.Exit()
+
+    success = delete_collection()
+    if success:
+        typer.echo("Collection deleted.")
     else:
-        # Fallback: human-readable format
-        for m in matches:
-            typer.echo(
-                f"{m['filename']} - score: {m['score']:.3f} - type: {m['type']} - "
-                f"tags: {m['tags']} - status: {m['status']}"
-            )
+        typer.echo("Collection does not exist.")
 
 if __name__ == "__main__":
     app()
