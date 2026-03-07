@@ -646,12 +646,15 @@ def search_notes_graph(
     return reranked if top_k == 0 else reranked[:top_k]
 
 
+from pathlib import Path
+
 def search_by_filename_exact(
     filename: str,
     folders: list[str] | None = None
 ):
     """
-    Return notes whose filename exactly matches the given name.
+    Return notes whose filename exactly matches the given name,
+    excluding hidden files/folders (starting with a dot).
 
     Args:
         filename: exact note name (without .md)
@@ -665,19 +668,24 @@ def search_by_filename_exact(
 
     for path in Path(NOTES_DIR).rglob("*.md"):
 
+        # Exclude hidden files
         if path.name.startswith("."):
+            continue
+
+        # Exclude any path that has a folder starting with a dot
+        if any(part.startswith(".") for part in path.parts):
             continue
 
         relative = path.relative_to(NOTES_DIR)
 
-        # folder filter
+        # Optional folder filter
         if folders:
             if not any(str(relative.parent).startswith(f) for f in folders):
                 continue
 
+        # Exact filename match (case-insensitive)
         if path.stem.lower() == filename.lower():
-
-            results.append(f"{str(relative.parent)}/{str(relative)}")
+            results.append(str(relative))
 
     return results
 
