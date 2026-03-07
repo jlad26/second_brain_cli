@@ -16,11 +16,11 @@ from qdrant_client.http.models import (
     FusionQuery,
     MatchValue,
     PayloadSchemaType,
+    PointIdsList,
     Prefetch,
     SparseVector,
     SparseVectorParams,
-    VectorParams,
-    Range
+    VectorParams
 )
 
 from openai import OpenAI
@@ -43,6 +43,7 @@ QDRANT_URL = os.getenv("SB_QDRANT_URL")
 QDRANT_API_KEY = os.getenv("SB_QDRANT_API_KEY")
 COLLECTION_NAME = os.getenv("SB_QDRANT_COLLECTION_NAME", "")
 CACHE_FILE = os.getenv("SB_QDRANT_CACHE_FILE", "")
+INDEX_CACHE_FILE = os.getenv("SB_QDRANT_INDEX_CACHE", "")
 OPENAI_API_KEY = os.getenv("SB_QDRANT_OPENAI_API_KEY")
 NOTES_DIR = os.getenv("SB_QDRANT_NOTES_DIR", "")
 EMBED_MODEL = os.getenv("SB_QDRANT_EMBED_MODEL", "")
@@ -143,6 +144,19 @@ def save_cache(cache):
         json.dump(cache, f)
 
 
+def load_index_cache():
+    path = Path(INDEX_CACHE_FILE)
+    if path.exists():
+        with open(path, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_index_cache(cache):
+    with open(INDEX_CACHE_FILE, "w") as f:
+        json.dump(cache, f)
+
+
 embedding_cache = load_cache()
 
 
@@ -188,25 +202,7 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
     # Load existing UUID -> hash from Qdrant
     # ---------------------------------------
 
-    existing_hashes = {}
-
-    scroll_offset = None
-
-    while True:
-        points, scroll_offset = qdrant.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=1000,
-            offset=scroll_offset,
-            with_payload=["uuid", "hash"],
-            with_vectors=False
-        )
-
-        for p in points:
-            if p.payload:
-                existing_hashes[p.payload["uuid"]] = p.payload.get("hash")
-
-        if scroll_offset is None:
-            break
+    existing_hashes = load_index_cache()
 
     # ---------------------------------------
     # Scan vault once
@@ -264,6 +260,8 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
         status = note.get("status", "active")
         note_type = note.get("type", "idea")
         tags = note.get("tags", [])
+        if isinstance(tags, str):
+            tags = [tags]
 
         # ---------------------------------------
         # Compute hash INCLUDING metadata
@@ -303,9 +301,31 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
             }
         })
 
-    print(f"{len(notes_to_embed)} notes require embedding")
-
     updated = 0
+    
+    # ---------------------------------------
+    # Detect deleted notes
+    # ---------------------------------------
+
+    current_note_ids = {note_uuid(p) for p in note_paths}
+    cached_note_ids = set(existing_hashes.keys())
+
+    deleted_ids = cached_note_ids - current_note_ids
+
+    if deleted_ids:
+        print(f"Removing {len(deleted_ids)} deleted notes from index")
+
+        qdrant.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=PointIdsList(
+                points=list(deleted_ids)
+            )
+        )
+
+        for did in deleted_ids:
+            existing_hashes.pop(did, None)
+
+    print(f"{len(notes_to_embed)} notes require embedding")
 
     # ---------------------------------------
     # Embed + upsert in batches
@@ -337,13 +357,18 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
             collection_name=COLLECTION_NAME,
             points=points
         )
+        
+        # ✅ Update local index cache AFTER successful upsert
+        for n in batch:
+            existing_hashes[n["id"]] = n["payload"]["hash"]
 
         updated += len(points)
 
         print(f"Embedded {updated}/{len(notes_to_embed)}")
 
-    # Save embedding cache once
+    # Save embedding cache and index cache
     save_cache(embedding_cache)
+    save_index_cache(existing_hashes)
 
     return updated
 

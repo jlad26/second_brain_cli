@@ -12,5 +12,6 @@ wheels/
 # Environment files
 .env
 
-# Embedding cache
+# Cache files
 embedding_cache.json
+index_cache.json
