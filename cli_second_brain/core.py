@@ -353,35 +353,64 @@ def build_filter(type_filter=None, status=None, folder=None, tags=None):
 # SEARCH
 # ==========================
 
-def search_notes(query, top_k=5, min_score=None, include_content=False, **filters):
-    query_emb = openai_client.embeddings.create(
-        input=query,
-        model=EMBED_MODEL
-    ).data[0].embedding
+def search_notes(query=None, top_k=5, min_score=None, include_content=False, **filters):
+    """
+    Search notes using semantic similarity and optional filters.
 
-    sparse_query = list(sparse_model.embed([query]))[0]
-    sparse_vector = SparseVector(
-        indices=list(sparse_query.indices),
-        values=list(sparse_query.values)
-    )
+    Args:
+        query (str | None): Semantic search query. If None, performs a filter-only search.
+        top_k (int): Maximum number of results. Set 0 to return all matching notes.
+        min_score (float | None): Minimum similarity score threshold to filter results.
+        include_content (bool): Whether to include the full note content in the output.
+        **filters: Optional filters including status, folder, tags, type, etc.
 
+    Returns:
+        list[dict]: A list of note entries with metadata and optional content.
+
+    Notes:
+        - If query is None, only filtering is applied (no semantic search).
+        - If top_k=0, all notes matching the filters (and query if given) are returned.
+    """
     payload_filter = build_filter(**filters)
+
+    prefetch = []
+    fusion_query = None
+
+    if query:
+        query_emb = openai_client.embeddings.create(
+            input=query,
+            model=EMBED_MODEL
+        ).data[0].embedding
+
+        sparse_query = list(sparse_model.embed([query]))[0]
+        sparse_vector = SparseVector(
+            indices=list(sparse_query.indices),
+            values=list(sparse_query.values)
+        )
+
+        prefetch = [
+            Prefetch(query=query_emb, using=""),
+            Prefetch(query=sparse_vector, using="text")
+        ]
+        fusion_query = FusionQuery(fusion=Fusion.RRF)
+
+    # If top_k=0, fetch all matching points
+    qdrant_limit = top_k if top_k > 0 else 1000000  # arbitrarily large for "all"
 
     results = qdrant.query_points(
         collection_name=COLLECTION_NAME,
-        prefetch=[
-            Prefetch(query=query_emb, using=""),
-            Prefetch(query=sparse_vector, using="text")
-        ],
-        query=FusionQuery(fusion=Fusion.RRF),
-        limit=top_k * 2,
+        prefetch=prefetch if prefetch else None,
+        query=fusion_query,
+        limit=qdrant_limit * 2 if top_k > 0 else qdrant_limit,  # maintain previous *2 only if top_k>0
         query_filter=payload_filter
     )
 
     hits = results.points
     if min_score:
         hits = [h for h in hits if h.score >= min_score]
-    hits = hits[:top_k]
+
+    # Slice to top_k only if top_k>0
+    hits = hits if top_k == 0 else hits[:top_k]
 
     output = []
     for h in hits:
@@ -497,7 +526,7 @@ def graph_rerank(
 
 
 def search_notes_graph(
-    query,
+    query=None,
     top_k=5,
     graph_boost=0.05,
     graph_expand=False,
@@ -505,16 +534,40 @@ def search_notes_graph(
     include_content=False,
     **filters
 ):
-    # initial search
+    """
+    Perform a graph-boosted semantic search with optional filters.
+
+    Args:
+        query (str | None): Semantic search query. If None, performs filter-only search.
+        top_k (int): Maximum number of results. Set 0 to return all matching notes.
+        graph_boost (float): Score boost applied to graph neighbors.
+        graph_expand (bool): If True, includes neighbors not in initial results.
+        min_score (float | None): Minimum similarity score for the initial semantic search.
+        include_content (bool): Whether to include the full note content in the output.
+        **filters: Optional filters including status, folder, tags, type, etc.
+
+    Returns:
+        list[dict]: A list of notes with reranked scores, metadata, and optional content.
+
+    Notes:
+        - If query is None, only filters are applied (no semantic search).
+        - If top_k=0, all notes matching the filters (and query if given) are returned.
+        - Graph boosting applies to existing search results and optionally to neighbors
+          if `graph_expand` is True.
+    """
+    # Determine how many initial results to fetch
+    initial_top_k = top_k * 3 if top_k > 0 else 1000000  # fetch all if top_k=0
+
+    # Initial search (semantic + filters)
     results = search_notes(
         query=query,
-        top_k=top_k * 3,
+        top_k=initial_top_k,
         min_score=min_score,
         include_content=include_content,
         **filters
     )
 
-    # rerank and optionally expand neighbors
+    # Rerank and optionally expand neighbors
     reranked = graph_rerank(
         results,
         boost=graph_boost,
@@ -522,7 +575,7 @@ def search_notes_graph(
         **filters
     )
 
-    # fetch file content for any neighbors added via expand
+    # Fetch file content for any neighbors added via expand
     if include_content:
         for r in reranked:
             if "note_content" not in r:
@@ -532,12 +585,13 @@ def search_notes_graph(
                 else:
                     r["note_content"] = None
 
-    # convert neighbor links UUIDs to filenames for CLI
+    # Convert neighbor links UUIDs to filenames for CLI
     for r in reranked:
         if "links" in r:
             r["links"] = resolve_uuids_to_filenames(r["links"])
 
-    return reranked[:top_k]
+    # Slice final results only if top_k > 0
+    return reranked if top_k == 0 else reranked[:top_k]
 
 
 def delete_collection():

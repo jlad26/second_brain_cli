@@ -41,10 +41,10 @@ def embed(
 # ==========================
 # SEARCH
 # ==========================
-@app.command(help="Search notes by semantic similarity with optional filters")
+@app.command(help="Search notes by semantic similarity with optional filters. Set --top-k 0 to return all results.")
 def search(
-    query: str,
-    top_k: int = typer.Option(5, help="Maximum number of results"),
+    query: str = typer.Argument(None, help="Search query (leave empty to filter only)"),
+    top_k: int = typer.Option(5, help="Maximum number of results (set 0 for all results)"),
     min_score: float = typer.Option(None, help="Minimum similarity score threshold"),
     status: list[str] = typer.Option(None, help="Filter by note status (can provide multiple)"),
     folder: list[str] = typer.Option(None, help="Filter by folder(s) of the notes"),
@@ -62,10 +62,10 @@ def search(
     )
     typer.echo(json.dumps(matches, indent=2))
 
-@app.command(name="search-graph", help="Graph-boosted semantic search with optional filters")
+@app.command(name="search-graph", help="Graph-boosted semantic search with optional filters. Set --top-k 0 to return all results.")
 def search_graph(
-    query: str,
-    top_k: int = typer.Option(5, help="Maximum number of results"),
+    query: str = typer.Argument(None, help="Search query (leave empty to filter only)"),
+    top_k: int = typer.Option(5, help="Maximum number of results (set 0 for all results)"),
     graph_boost: float = typer.Option(0.05, help="Score boost for graph neighbors"),
     status: list[str] = typer.Option(None, help="Filter by note status"),
     folder: list[str] = typer.Option(None, help="Filter by folder(s)"),
