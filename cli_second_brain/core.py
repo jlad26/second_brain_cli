@@ -244,12 +244,6 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
             continue
 
         note_id = note_uuid(note_path)
-        current_hash = file_hash(text)
-
-        if not force_update:
-            existing_hash = existing_hashes.get(note_id)
-            if existing_hash == current_hash:
-                continue
 
         # ---------------------------------------
         # Resolve links using filename index
@@ -267,6 +261,33 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 
         relative_path = note_path.relative_to(NOTES_DIR)
 
+        status = note.get("status", "active")
+        note_type = note.get("type", "idea")
+        tags = note.get("tags", [])
+
+        # ---------------------------------------
+        # Compute hash INCLUDING metadata
+        # ---------------------------------------
+
+        hash_source = json.dumps(
+            {
+                "content": text,
+                "status": status,
+                "type": note_type,
+                "tags": tags,
+                "links": sorted(link_uuids),
+                "filename": str(relative_path),
+            },
+            sort_keys=True,
+        )
+
+        current_hash = file_hash(hash_source)
+
+        if not force_update:
+            existing_hash = existing_hashes.get(note_id)
+            if existing_hash == current_hash:
+                continue
+
         notes_to_embed.append({
             "id": note_id,
             "text": text,
@@ -274,9 +295,9 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
                 "filename": str(relative_path),
                 "uuid": note_id,
                 "folder": str(relative_path.parent),
-                "status": note.get("status", "active"),
-                "type": note.get("type", "idea"),
-                "tags": note.get("tags", []),
+                "status": status,
+                "type": note_type,
+                "tags": tags,
                 "links": link_uuids,
                 "hash": current_hash
             }
