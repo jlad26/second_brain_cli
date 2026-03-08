@@ -97,16 +97,22 @@ def neighbors(
         None,
         "--type",
         help="Filter by note type (can provide multiple)"
+    ),
+    include_content: bool = typer.Option(
+        False,
+        "--include-content",
+        help="Include the full note content in the output"
     )
 ):
     """
     Retrieve graph neighbors for a note identified by relative path
-    (folder/filename) with optional status and type filters.
+    (folder/filename) with optional status/type filters and note content.
     """
     results = get_neighbors_by_relative_path(
         relative_path,
         status=status,
-        type_filter=type_filter
+        type_filter=type_filter,
+        include_content=include_content
     )
     typer.echo(json.dumps(results, indent=2))
 

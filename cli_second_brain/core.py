@@ -580,15 +580,21 @@ def get_graph_neighbors(note_name, status=None, folder=None, tags=None, limit=No
     neighbors.update(get_backlinks(note_name, status=status, folder=folder, tags=tags, limit=limit))
     return list(neighbors)
 
-def get_neighbors_by_relative_path(relative_path: str, status=None, type_filter: list[str] | None = None):
+def get_neighbors_by_relative_path(
+    relative_path: str,
+    status: list[str] | None = None,
+    type_filter: list[str] | None = None,
+    include_content: bool = False
+):
     """
     Return graph neighbors (links + backlinks) for a note identified
-    by its relative path (folder/filename). Returns filenames instead of UUIDs.
+    by its relative path (folder/filename). Can include note content.
 
     Args:
         relative_path: string like "Interests/Artificial Intelligence"
-        status: optional list of note statuses to filter
-        type_filter: optional list of note types to filter neighbors (e.g., ["idea", "project"])
+        status: optional list of note statuses to filter neighbors
+        type_filter: optional list of note types to filter neighbors
+        include_content: if True, include the full note content
     """
     from pathlib import Path
 
@@ -596,7 +602,6 @@ def get_neighbors_by_relative_path(relative_path: str, status=None, type_filter:
     path_obj = Path(relative_path)
     if path_obj.suffix != ".md":
         path_obj = path_obj.with_suffix(".md")
-
     relative_path_str = str(path_obj)
 
     # Lookup the note in Qdrant
@@ -626,7 +631,21 @@ def get_neighbors_by_relative_path(relative_path: str, status=None, type_filter:
         neighbors = filtered_neighbors
 
     # Convert UUIDs → filenames
-    return resolve_uuids_to_filenames(neighbors)
+    neighbor_filenames = resolve_uuids_to_filenames(neighbors)
+
+    if include_content:
+        output = []
+        for uid, fname in zip(neighbors, neighbor_filenames):
+            file_path = Path(NOTES_DIR) / fname
+            note_content = file_path.read_text(encoding="utf-8") if file_path.exists() else None
+            output.append({
+                "filename": fname,
+                "uuid": uid,
+                "note_content": note_content
+            })
+        return output
+
+    return neighbor_filenames
 
 def graph_rerank(
     results, 
