@@ -112,8 +112,46 @@ def graph(note: str, status: list[str] = None, folder: list[str] = None, tags: l
     typer.echo(json.dumps(get_connected(note, status=status, folder=folder, tags=tags), indent=2))
 
 # ==========================
-# DELETE COLLECTION
+# DELETE / REBUILD COLLECTION
 # ==========================
+
+@app.command(help="Fully rebuild the Qdrant index from scratch")
+def rebuild(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    batch_size: int = typer.Option(None, help="Override batch size for embedding")
+):
+    """
+    Rebuild the entire search index.
+
+    Steps:
+    1. Delete the Qdrant collection
+    2. Clear the local index cache
+    3. Re-embed all notes in the vault
+
+    The embedding cache is preserved to avoid recomputing embeddings.
+    """
+
+    if not yes:
+        confirm = typer.confirm(
+            "This will delete the entire collection and rebuild the index. Continue?"
+        )
+        if not confirm:
+            typer.echo("Aborted.")
+            raise typer.Exit()
+
+    typer.echo("🧹 Deleting collection...")
+    delete_collection()
+
+    final_batch_size = batch_size if batch_size is not None else int(
+        os.getenv("SB_QDRANT_BATCH_SIZE", 1)
+    )
+
+    typer.echo("🔄 Re-embedding all notes...")
+    updated = embed_all_notes(batch_size=final_batch_size, force_update=True)
+
+    typer.echo(f"✅ Rebuild complete. Embedded {updated} notes.")
+
+
 @app.command(name="delete-collection", help="Delete the entire Qdrant collection")
 def delete_collection_cmd(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt")

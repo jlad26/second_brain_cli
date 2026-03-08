@@ -712,5 +712,10 @@ def delete_collection():
         return False
 
     qdrant.delete_collection(collection_name=COLLECTION_NAME)
+    
+    # Clear index cache
+    index_path = Path(INDEX_CACHE_FILE)
+    if index_path.exists():
+        index_path.unlink()
 
     return True
