@@ -4,6 +4,7 @@ import os
 import uuid
 import re
 from collections import defaultdict
+from dotenv import load_dotenv
 from pathlib import Path
 from typing import Optional
 
@@ -31,13 +32,21 @@ from fastembed import SparseTextEmbedding
 # CONFIGURATION
 # ==========================
 
-current_file_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_file_dir)
-env_file_path = os.path.join(parent_dir, ".env")
+def load_env():
+    """Load environment variables for the CLI."""
+    
+    # 1. Local project .env
+    local_env = Path.cwd() / ".env"
+    
+    # 2. User config directory
+    user_env = Path.home() / ".config" / "second-brain" / ".env"
 
-if os.path.exists(env_file_path):
-    from dotenv import load_dotenv
-    load_dotenv()
+    if local_env.exists():
+        load_dotenv(local_env)
+    elif user_env.exists():
+        load_dotenv(user_env)
+
+load_env()
 
 SB_QDRANT_HF_TOKEN = os.getenv("SB_QDRANT_HF_TOKEN", "")
 QDRANT_URL = os.getenv("SB_QDRANT_URL")
