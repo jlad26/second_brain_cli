@@ -159,8 +159,18 @@ def note_uuid(path: Path):
 def resolve_uuids_to_filenames(uuids: list[str]):
     if not uuids:
         return []
-    points, _ = qdrant.scroll(collection_name=COLLECTION_NAME, scroll_filter=None, limit=len(uuids))
-    uuid_to_filename = {r.payload["uuid"]: r.payload["filename"] for r in points if r.payload}
+
+    points = qdrant.retrieve(
+        collection_name=COLLECTION_NAME,
+        ids=uuids
+    )
+
+    uuid_to_filename = {
+        r.payload["uuid"]: r.payload["filename"]
+        for r in points
+        if r.payload
+    }
+
     return [uuid_to_filename.get(u, u) for u in uuids]
 
 # ==========================
