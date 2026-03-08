@@ -149,7 +149,8 @@ def extract_links(text: str):
 
 
 def file_hash(text: str):
-    return hashlib.sha256(text.encode()).hexdigest()
+    payload = f"{EMBED_MODEL}:{text}"
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def note_uuid(path: Path):
