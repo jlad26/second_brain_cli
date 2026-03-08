@@ -167,6 +167,15 @@ def resolve_uuids_to_filenames(uuids: list[str]):
 # EMBEDDING CACHE
 # ==========================
 
+def atomic_write_json(path: Path, data):
+    tmp_path = path.with_suffix(".tmp")
+
+    with open(tmp_path, "w") as f:
+        json.dump(data, f)
+
+    tmp_path.replace(path)
+
+
 def load_cache():
     if Path(CACHE_FILE).exists():
         with open(CACHE_FILE, "r") as f:
@@ -175,8 +184,7 @@ def load_cache():
 
 
 def save_cache(cache):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f)
+    atomic_write_json(Path(CACHE_FILE), cache)
 
 
 def load_index_cache():
@@ -188,8 +196,7 @@ def load_index_cache():
 
 
 def save_index_cache(cache):
-    with open(INDEX_CACHE_FILE, "w") as f:
-        json.dump(cache, f)
+    atomic_write_json(Path(INDEX_CACHE_FILE), cache)
 
 
 embedding_cache = load_cache()
