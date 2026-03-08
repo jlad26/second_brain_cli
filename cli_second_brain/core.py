@@ -231,73 +231,73 @@ def get_embeddings(texts):
 # EMBEDDING PIPELINE
 # ==========================
 
+def scan_notes(vault_dir: Path):
+    """
+    Recursively scan vault_dir for Markdown files, skipping hidden files/folders.
+    Returns a list of Path objects.
+    """
+    note_paths = []
+    vault_dir = vault_dir.resolve()
+
+    for root, dirs, files in os.walk(vault_dir):
+        # Skip hidden directories
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+        for f in files:
+            if f.startswith(".") or not f.endswith(".md"):
+                continue
+            note_paths.append(Path(root) / f)
+
+    return note_paths
+
+
 def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
+    """
+    Scan the NOTES_DIR vault, compute embeddings for new or changed notes,
+    and upsert them into Qdrant, updating embedding and index caches.
+    """
+    NOTES_DIR_path = Path(NOTES_DIR).expanduser().resolve()
+    if not NOTES_DIR_path.exists():
+        raise ValueError(f"NOTES_DIR does not exist: {NOTES_DIR_path}")
 
     # ---------------------------------------
     # Load existing UUID -> hash from Qdrant
     # ---------------------------------------
-
     existing_hashes = load_index_cache()
     
-    # Handle the scenario of a deleted collection.
     if COLLECTION_NAME not in [c.name for c in qdrant.get_collections().collections]:
         print("⚠ Qdrant collection missing, clearing local index cache")
         existing_hashes = {}
 
     # ---------------------------------------
-    # Scan vault once
+    # Scan vault (fast, relative hidden filtering)
     # ---------------------------------------
-
-    print(f"Scanning notes directory: {NOTES_DIR}")
-    
-    note_paths = [
-        p for p in Path(NOTES_DIR).rglob("*.md")
-        if not any(part.startswith(".") for part in p.parts)
-        and not p.name.startswith(".")
-    ]
-
+    note_paths = scan_notes(NOTES_DIR_path)
     print(f"Vault scan found {len(note_paths)} markdown files")
 
-    # ---------------------------------------
     # Build filename -> path index
-    # ---------------------------------------
-
     filename_index = defaultdict(list)
-
     for p in note_paths:
         filename_index[p.stem].append(p)
 
     notes_to_embed = []
 
-    # ---------------------------------------
-    # Process notes
-    # ---------------------------------------
-
     for note_path in note_paths:
-
         note = frontmatter.load(str(note_path))
         text = note.content.strip()
-
         if not text:
             continue
 
         note_id = note_uuid(note_path)
 
-        # ---------------------------------------
-        # Resolve links using filename index
-        # ---------------------------------------
-
+        # Resolve links
         link_names = extract_links(text)
         link_uuids = []
-
         for lname in link_names:
-
-            candidates = filename_index.get(lname, [])
-
-            for candidate in candidates:
+            for candidate in filename_index.get(lname, []):
                 link_uuids.append(note_uuid(candidate))
 
-        relative_path = note_path.relative_to(NOTES_DIR)
+        relative_path = note_path.relative_to(NOTES_DIR_path)
 
         status = note.get("status", "active")
         note_type = note.get("type", "idea")
@@ -305,10 +305,7 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
         if isinstance(tags, str):
             tags = [tags]
 
-        # ---------------------------------------
-        # Compute hash INCLUDING metadata
-        # ---------------------------------------
-
+        # Compute hash including metadata
         hash_source = json.dumps(
             {
                 "content": text,
@@ -323,10 +320,8 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 
         current_hash = file_hash(hash_source)
 
-        if not force_update:
-            existing_hash = existing_hashes.get(note_id)
-            if existing_hash == current_hash:
-                continue
+        if not force_update and existing_hashes.get(note_id) == current_hash:
+            continue
 
         notes_to_embed.append({
             "id": note_id,
@@ -344,26 +339,18 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
         })
 
     updated = 0
-    
-    # ---------------------------------------
-    # Detect deleted notes
-    # ---------------------------------------
 
+    # Detect deleted notes
     current_note_ids = {note_uuid(p) for p in note_paths}
     cached_note_ids = set(existing_hashes.keys())
-
     deleted_ids = cached_note_ids - current_note_ids
 
     if deleted_ids:
         print(f"Removing {len(deleted_ids)} deleted notes from index")
-
         qdrant.delete(
             collection_name=COLLECTION_NAME,
-            points_selector=PointIdsList(
-                points=list(deleted_ids)
-            )
+            points_selector=PointIdsList(points=list(deleted_ids))
         )
-
         for did in deleted_ids:
             existing_hashes.pop(did, None)
 
@@ -372,20 +359,15 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
     # ---------------------------------------
     # Embed + upsert in batches
     # ---------------------------------------
-
     for i in range(0, len(notes_to_embed), batch_size):
-
         batch = notes_to_embed[i:i + batch_size]
-
         texts = [n["text"] for n in batch]
 
         dense_vectors = get_embeddings(texts)
         sparse_vectors = list(sparse_model.embed(texts))
 
         points = []
-
         for n, dense, sparse in zip(batch, dense_vectors, sparse_vectors):
-
             points.append({
                 "id": n["id"],
                 "vector": {
@@ -395,20 +377,16 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
                 "payload": n["payload"]
             })
 
-        qdrant.upsert(
-            collection_name=COLLECTION_NAME,
-            points=points
-        )
-        
-        # ✅ Update local index cache AFTER successful upsert
+        qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
+
+        # Update index cache
         for n in batch:
             existing_hashes[n["id"]] = n["payload"]["hash"]
 
         updated += len(points)
-
         print(f"Embedded {updated}/{len(notes_to_embed)}")
 
-    # Save embedding cache and index cache
+    # Save caches
     save_cache(embedding_cache)
     save_index_cache(existing_hashes)
 
