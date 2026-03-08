@@ -177,10 +177,17 @@ def atomic_write_json(path: Path, data):
 
 
 def load_cache():
-    if Path(CACHE_FILE).exists():
-        with open(CACHE_FILE, "r") as f:
+    path = Path(CACHE_FILE)
+
+    if not path.exists():
+        return {}
+
+    try:
+        with open(path, "r") as f:
             return json.load(f)
-    return {}
+    except Exception:
+        print("⚠ embedding cache corrupted")
+        return {}
 
 
 def save_cache(cache):
@@ -189,10 +196,16 @@ def save_cache(cache):
 
 def load_index_cache():
     path = Path(INDEX_CACHE_FILE)
-    if path.exists():
+
+    if not path.exists():
+        return {}
+
+    try:
         with open(path, "r") as f:
             return json.load(f)
-    return {}
+    except Exception:
+        print("⚠ index cache corrupted")
+        return {}
 
 
 def save_index_cache(cache):
