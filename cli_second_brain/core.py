@@ -580,7 +580,7 @@ def get_graph_neighbors(note_name, status=None, folder=None, tags=None, limit=No
     neighbors.update(get_backlinks(note_name, status=status, folder=folder, tags=tags, limit=limit))
     return list(neighbors)
 
-def get_neighbors_by_relative_path(relative_path: str, status=None, type_filter=None):
+def get_neighbors_by_relative_path(relative_path: str, status=None, type_filter: list[str] | None = None):
     """
     Return graph neighbors (links + backlinks) for a note identified
     by its relative path (folder/filename). Returns filenames instead of UUIDs.
@@ -588,7 +588,7 @@ def get_neighbors_by_relative_path(relative_path: str, status=None, type_filter=
     Args:
         relative_path: string like "Interests/Artificial Intelligence"
         status: optional list of note statuses to filter
-        type_filter: optional note type to filter neighbors (e.g., "idea", "project")
+        type_filter: optional list of note types to filter neighbors (e.g., ["idea", "project"])
     """
     from pathlib import Path
 
@@ -613,15 +613,15 @@ def get_neighbors_by_relative_path(relative_path: str, status=None, type_filter=
 
     note_uuid = points[0].payload["uuid"]
 
-    # Fetch neighbors with optional status/type filters
+    # Fetch neighbors with optional status filter
     neighbors = get_graph_neighbors(note_uuid, status=status, folder=None, tags=None, limit=None)
 
-    # Now filter neighbors by type if type_filter is set
+    # Filter neighbors by type(s) if provided
     if type_filter:
         filtered_neighbors = []
         points = qdrant.retrieve(collection_name=COLLECTION_NAME, ids=neighbors)
         for p in points:
-            if p.payload and p.payload.get("type") == type_filter:
+            if p.payload and p.payload.get("type") in type_filter:
                 filtered_neighbors.append(p.payload["uuid"])
         neighbors = filtered_neighbors
 

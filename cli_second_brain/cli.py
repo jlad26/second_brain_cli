@@ -93,10 +93,10 @@ def search_graph(
 def neighbors(
     relative_path: str,
     status: list[str] = typer.Option(None, help="Filter by note status"),
-    type_filter: str = typer.Option(
+    type_filter: list[str] = typer.Option(
         None,
         "--type",
-        help="Filter by note type (e.g., idea, project)"
+        help="Filter by note type (can provide multiple)"
     )
 ):
     """
