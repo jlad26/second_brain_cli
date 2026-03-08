@@ -16,3 +16,11 @@ pipx installation
 ## CLI installation
 
 `pipx install git+https://github.com/jlad26/second_brain_cli.git`
+
+## Upgrade
+
+`pipx upgrade cli_second_brain`
+
+## Uninstallation
+
+`pipx uninstall cli_second_brain`
