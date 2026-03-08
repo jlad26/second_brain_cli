@@ -15,4 +15,4 @@ pipx installation
 
 ## CLI installation
 
-`pipx install git+ssh://git@github-cli_second_brain/jlad26/second_brain_cli.git`
+`pipx install git+https://github.com/jlad26/second_brain_cli.git`
