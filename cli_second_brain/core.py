@@ -35,16 +35,17 @@ from fastembed import SparseTextEmbedding
 def load_env():
     """Load environment variables for the CLI."""
     
-    # 1. Local project .env
-    local_env = Path.cwd() / ".env"
-    
-    # 2. User config directory
+    # User config directory
     user_env = Path.home() / ".config" / "second-brain" / ".env"
+    
+    # Local project .env
+    local_env = Path.cwd() / ".env"
+
+    if user_env.exists():
+        load_dotenv(user_env)
 
     if local_env.exists():
-        load_dotenv(local_env)
-    elif user_env.exists():
-        load_dotenv(user_env)
+        load_dotenv(local_env, override=True)
 
 load_env()
 
@@ -67,7 +68,9 @@ QDRANT_URL = os.getenv("SB_QDRANT_URL")
 QDRANT_API_KEY = os.getenv("SB_QDRANT_API_KEY")
 COLLECTION_NAME = os.getenv("SB_QDRANT_COLLECTION_NAME", "")
 OPENAI_API_KEY = os.getenv("SB_QDRANT_OPENAI_API_KEY")
-NOTES_DIR = os.getenv("SB_QDRANT_NOTES_DIR", "")
+NOTES_DIR = Path(os.getenv("SB_QDRANT_NOTES_DIR", "")).expanduser().resolve()
+if not NOTES_DIR.exists():
+    raise ValueError(f"NOTES_DIR does not exist: {NOTES_DIR}")
 EMBED_MODEL = os.getenv("SB_QDRANT_EMBED_MODEL", "")
 BATCH_SIZE = int(os.getenv("SB_QDRANT_BATCH_SIZE", 64))
 GRAPH_NEIGHBOR_LIMIT = int(os.getenv("SB_GRAPH_NEIGHBOR_LIMIT", 20))
@@ -245,6 +248,8 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
     # Scan vault once
     # ---------------------------------------
 
+    print(f"Scanning notes directory: {NOTES_DIR}")
+    
     note_paths = [
         p for p in Path(NOTES_DIR).rglob("*.md")
         if not any(part.startswith(".") for part in p.parts)
