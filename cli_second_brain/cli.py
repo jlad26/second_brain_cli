@@ -7,6 +7,7 @@ from cli_second_brain.core import (
     embed_all_notes,
     get_backlinks,
     get_connected,
+    get_neighbors_by_relative_path,
     get_links,
     search_by_filename_exact,
     search_notes,
@@ -88,6 +89,18 @@ def search_graph(
     )
     typer.echo(json.dumps(matches, indent=2))
     
+@app.command(help="Show graph neighbors (links + backlinks) of a note by relative path")
+def neighbors(
+    relative_path: str,
+    status: list[str] = typer.Option(None, help="Filter by note status")
+):
+    """
+    Retrieve graph neighbors for a note identified by relative path
+    (folder/filename) instead of just filename.
+    """
+    results = get_neighbors_by_relative_path(relative_path, status=status)
+    typer.echo(json.dumps(results, indent=2))
+
 @app.command(help="Find notes by exact filename")
 def filename(
     name: str,

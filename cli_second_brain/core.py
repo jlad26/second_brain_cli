@@ -580,6 +580,34 @@ def get_graph_neighbors(note_name, status=None, folder=None, tags=None, limit=No
     neighbors.update(get_backlinks(note_name, status=status, folder=folder, tags=tags, limit=limit))
     return list(neighbors)
 
+def get_neighbors_by_relative_path(relative_path: str, status=None):
+    from pathlib import Path
+
+    # Ensure relative path has .md extension
+    path_obj = Path(relative_path)
+    if path_obj.suffix != ".md":
+        path_obj = path_obj.with_suffix(".md")
+
+    relative_path_str = str(path_obj)
+
+    # Lookup in Qdrant
+    points, _ = qdrant.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="filename", match=MatchValue(value=relative_path_str))]
+        ),
+        limit=1
+    )
+
+    if not points or not points[0].payload:
+        return []
+
+    note_uuid = points[0].payload["uuid"]
+
+    neighbors = get_graph_neighbors(note_uuid, status=status)
+
+    return resolve_uuids_to_filenames(neighbors)
+
 def graph_rerank(
     results, 
     boost=0.05, 
