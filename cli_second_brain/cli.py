@@ -92,13 +92,22 @@ def search_graph(
 @app.command(help="Show graph neighbors (links + backlinks) of a note by relative path")
 def neighbors(
     relative_path: str,
-    status: list[str] = typer.Option(None, help="Filter by note status")
+    status: list[str] = typer.Option(None, help="Filter by note status"),
+    type_filter: str = typer.Option(
+        None,
+        "--type",
+        help="Filter by note type (e.g., idea, project)"
+    )
 ):
     """
     Retrieve graph neighbors for a note identified by relative path
-    (folder/filename) instead of just filename.
+    (folder/filename) with optional status and type filters.
     """
-    results = get_neighbors_by_relative_path(relative_path, status=status)
+    results = get_neighbors_by_relative_path(
+        relative_path,
+        status=status,
+        type_filter=type_filter
+    )
     typer.echo(json.dumps(results, indent=2))
 
 @app.command(help="Find notes by exact filename")
