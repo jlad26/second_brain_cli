@@ -48,17 +48,39 @@ def load_env():
 
 load_env()
 
+def get_cache_dir():
+    env_dir = os.getenv("SB_CACHE_DIR")
+
+    if env_dir:
+        path = Path(env_dir).expanduser()
+    else:
+        path = Path.home() / ".cache" / "second-brain"
+
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+CACHE_DIR = get_cache_dir()
+
 SB_QDRANT_HF_TOKEN = os.getenv("SB_QDRANT_HF_TOKEN", "")
 QDRANT_URL = os.getenv("SB_QDRANT_URL")
 QDRANT_API_KEY = os.getenv("SB_QDRANT_API_KEY")
 COLLECTION_NAME = os.getenv("SB_QDRANT_COLLECTION_NAME", "")
-CACHE_FILE = os.getenv("SB_QDRANT_CACHE_FILE", "")
-INDEX_CACHE_FILE = os.getenv("SB_QDRANT_INDEX_CACHE", "")
 OPENAI_API_KEY = os.getenv("SB_QDRANT_OPENAI_API_KEY")
 NOTES_DIR = os.getenv("SB_QDRANT_NOTES_DIR", "")
 EMBED_MODEL = os.getenv("SB_QDRANT_EMBED_MODEL", "")
 BATCH_SIZE = int(os.getenv("SB_QDRANT_BATCH_SIZE", 64))
 GRAPH_NEIGHBOR_LIMIT = int(os.getenv("SB_GRAPH_NEIGHBOR_LIMIT", 20))
+
+CACHE_FILE = os.getenv(
+    "SB_QDRANT_CACHE_FILE",
+    str(CACHE_DIR / "embedding_cache.json")
+)
+
+INDEX_CACHE_FILE = os.getenv(
+    "SB_QDRANT_INDEX_CACHE",
+    str(CACHE_DIR / "index_cache.json")
+)
 
 os.environ["HF_TOKEN"] = SB_QDRANT_HF_TOKEN
 
