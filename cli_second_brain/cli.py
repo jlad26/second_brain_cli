@@ -11,7 +11,7 @@ from cli_second_brain.core import (
     get_links,
     search_by_filename_exact,
     search_notes,
-    search_notes_graph, 
+    search_notes_graph,
 )
 
 app = typer.Typer(
@@ -36,9 +36,10 @@ def embed(
     3. Upsert embeddings into the Qdrant collection.
     4. Skip notes that haven't changed unless --force is used.
     """
-    final_batch_size = batch_size if batch_size is not None else int(os.getenv("SB_QDRANT_BATCH_SIZE", 1))
+    final_batch_size = batch_size if batch_size is not None else int(os.getenv("SB_QDRANT_BATCH_SIZE", 64))
     updated = embed_all_notes(batch_size=final_batch_size, force_update=force)
     typer.echo(f"✅ Updated {updated} notes (batch size={final_batch_size})")
+
 
 # ==========================
 # SEARCH
@@ -46,8 +47,14 @@ def embed(
 @app.command(help="Search notes by semantic similarity with optional filters. Set --top-k 0 to return all results.")
 def search(
     query: str = typer.Argument(None, help="Search query (leave empty to filter only)"),
-    top_k: int = typer.Option(5, help="Maximum number of results (set 0 for all results)"),
-    min_score: float = typer.Option(None, help="Minimum similarity score threshold"),
+    top_k: int | None = typer.Option(
+        None,
+        help="Maximum number of results (default from SB_DEFAULT_SEARCH_TOP_K, set 0 for all results)"
+    ),
+    min_score: float | None = typer.Option(
+        None,
+        help="Minimum similarity score (default from SB_DEFAULT_SEACRH_MIN_SCORE)"
+    ),
     status: list[str] = typer.Option(None, help="Filter by note status (can provide multiple)"),
     folder: list[str] = typer.Option(None, help="Filter by folder(s) of the notes"),
     tags: list[str] = typer.Option(None, help="Filter by tags (can provide multiple)"),
@@ -64,15 +71,22 @@ def search(
     )
     typer.echo(json.dumps(matches, indent=2))
 
+
 @app.command(name="search-graph", help="Graph-boosted semantic search with optional filters. Set --top-k 0 to return all results.")
 def search_graph(
     query: str = typer.Argument(None, help="Search query (leave empty to filter only)"),
-    top_k: int = typer.Option(5, help="Maximum number of results (set 0 for all results)"),
+    top_k: int | None = typer.Option(
+        None,
+        help="Maximum number of results (default from SB_DEFAULT_SEARCH_TOP_K, set 0 for all results)"
+    ),
     graph_boost: float = typer.Option(0.05, help="Score boost for graph neighbors"),
     status: list[str] = typer.Option(None, help="Filter by note status"),
     folder: list[str] = typer.Option(None, help="Filter by folder(s)"),
     tags: list[str] = typer.Option(None, help="Filter by tags"),
-    min_score: float = typer.Option(None, help="Minimum similarity score for the initial semantic search"),
+    min_score: float | None = typer.Option(
+        None,
+        help="Minimum similarity score (default from SB_DEFAULT_SEARCH_MIN_SCORE)"
+    ),
     graph_expand: bool = typer.Option(False, help="Include neighbors not in initial results; they appear at the bottom"),
     include_content: bool = typer.Option(False, help="Include the full note content in the results")
 ):
@@ -88,7 +102,8 @@ def search_graph(
         tags=tags
     )
     typer.echo(json.dumps(matches, indent=2))
-    
+
+
 @app.command(help="Show graph neighbors (links + backlinks) of a note by relative path")
 def neighbors(
     relative_path: str,
@@ -116,6 +131,7 @@ def neighbors(
     )
     typer.echo(json.dumps(results, indent=2))
 
+
 @app.command(help="Find notes by exact filename")
 def filename(
     name: str,
@@ -124,6 +140,7 @@ def filename(
     matches = search_by_filename_exact(name, folders=folder)
     typer.echo(json.dumps(matches, indent=2))
 
+
 # ==========================
 # LINKS / BACKLINKS / GRAPH
 # ==========================
@@ -131,18 +148,20 @@ def filename(
 def links(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
     typer.echo(json.dumps(get_links(note, status=status, folder=folder, tags=tags), indent=2))
 
+
 @app.command(help="Show all backlinks to a note")
 def backlinks(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
     typer.echo(json.dumps(get_backlinks(note, status=status, folder=folder, tags=tags), indent=2))
+
 
 @app.command(help="Show both links and backlinks for a note")
 def graph(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
     typer.echo(json.dumps(get_connected(note, status=status, folder=folder, tags=tags), indent=2))
 
+
 # ==========================
 # DELETE / REBUILD COLLECTION
 # ==========================
-
 @app.command(help="Fully rebuild the Qdrant index from scratch")
 def rebuild(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
@@ -158,7 +177,6 @@ def rebuild(
 
     The embedding cache is preserved to avoid recomputing embeddings.
     """
-
     if not yes:
         confirm = typer.confirm(
             "This will delete the entire collection and rebuild the index. Continue?"
@@ -201,6 +219,7 @@ def delete_collection_cmd(
         typer.echo("Collection deleted.")
     else:
         typer.echo("Collection does not exist.")
+
 
 if __name__ == "__main__":
     app()

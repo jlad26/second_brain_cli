@@ -74,6 +74,8 @@ if not NOTES_DIR.exists():
 EMBED_MODEL = os.getenv("SB_QDRANT_EMBED_MODEL", "")
 BATCH_SIZE = int(os.getenv("SB_QDRANT_BATCH_SIZE", 64))
 GRAPH_NEIGHBOR_LIMIT = int(os.getenv("SB_GRAPH_NEIGHBOR_LIMIT", 20))
+DEFAULT_SEARCH_MIN_SCORE = float(os.getenv("SB_DEFAULT_SEARCH_MIN_SCORE", 0.5))
+DEFAULT_SEARCH_TOP_K = int(os.getenv("SB_DEFAULT_SEARCH_TOP_K", 20))
 
 CACHE_FILE = os.getenv(
     "SB_QDRANT_CACHE_FILE",
@@ -450,7 +452,7 @@ def build_filter(type_filter=None, status=None, folder=None, tags=None):
 # SEARCH
 # ==========================
 
-def search_notes(query=None, top_k=5, min_score=None, include_content=False, **filters):
+def search_notes(query=None, top_k=None, min_score=None, include_content=False, **filters):
     """
     Search notes using semantic similarity and optional filters.
 
@@ -468,6 +470,12 @@ def search_notes(query=None, top_k=5, min_score=None, include_content=False, **f
         - If query is None, only filtering is applied (no semantic search).
         - If top_k=0, all notes matching the filters (and query if given) are returned.
     """
+    if top_k is None:
+        top_k = DEFAULT_SEARCH_TOP_K
+
+    if min_score is None:
+        min_score = DEFAULT_SEARCH_MIN_SCORE
+    
     payload_filter = build_filter(**filters)
 
     prefetch = []
@@ -691,7 +699,7 @@ def graph_rerank(
 
 def search_notes_graph(
     query=None,
-    top_k=5,
+    top_k=None,
     graph_boost=0.05,
     graph_expand=False,
     min_score=None,
@@ -719,6 +727,12 @@ def search_notes_graph(
         - Graph boosting applies to existing search results and optionally to neighbors
           if `graph_expand` is True.
     """
+    if top_k is None:
+        top_k = DEFAULT_SEARCH_TOP_K
+
+    if min_score is None:
+        min_score = DEFAULT_SEARCH_MIN_SCORE
+    
     # Determine how many initial results to fetch
     initial_top_k = top_k * 3 if top_k > 0 else 1000000  # fetch all if top_k=0
 
