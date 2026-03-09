@@ -68,7 +68,7 @@ QDRANT_URL = os.getenv("SB_QDRANT_URL")
 QDRANT_API_KEY = os.getenv("SB_QDRANT_API_KEY")
 COLLECTION_NAME = os.getenv("SB_QDRANT_COLLECTION_NAME", "")
 OPENAI_API_KEY = os.getenv("SB_QDRANT_OPENAI_API_KEY")
-NOTES_DIR = Path(os.getenv("SB_QDRANT_NOTES_DIR", "")).expanduser().resolve()
+NOTES_DIR = Path(os.getenv("SECOND_BRAIN_FOLDER_PATH", "")).expanduser().resolve()
 if not NOTES_DIR.exists():
     raise ValueError(f"NOTES_DIR does not exist: {NOTES_DIR}")
 EMBED_MODEL = os.getenv("SB_QDRANT_EMBED_MODEL", "")
