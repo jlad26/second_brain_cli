@@ -449,6 +449,28 @@ def build_filter(type_filter=None, status=None, folder=None, tags=None):
 
 
 # ==========================
+# HELPER TO LOAD FRONTMATTER
+# ==========================
+
+def load_note_frontmatter(relative_path: str, include_content=False):
+    """
+    Load a note frontmatter and optionally the full content.
+    Always returns content_summary if present.
+    """
+    file_path = Path(NOTES_DIR) / relative_path
+    content_summary = None
+    note_content = None
+
+    if file_path.exists():
+        note_data = frontmatter.load(str(file_path))
+        content_summary = note_data.get("content_summary")
+        if include_content:
+            note_content = note_data.content
+
+    return content_summary, note_content
+
+
+# ==========================
 # SEARCH
 # ==========================
 
@@ -522,6 +544,11 @@ def search_notes(query=None, top_k=None, min_score=None, include_content=False, 
         if not h.payload:
             continue
 
+        # Load content_summary always, note_content only if requested
+        content_summary, note_content = load_note_frontmatter(
+            h.payload["filename"], include_content=include_content
+        )
+
         entry = {
             "filename": h.payload["filename"],
             "uuid": h.payload.get("uuid"),
@@ -529,15 +556,12 @@ def search_notes(query=None, top_k=None, min_score=None, include_content=False, 
             "type": h.payload.get("type"),
             "status": h.payload.get("status"),
             "tags": h.payload.get("tags"),
-            "links": h.payload.get("links")
+            "links": h.payload.get("links"),
+            "content_summary": content_summary
         }
 
         if include_content:
-            file_path = Path(NOTES_DIR) / h.payload["filename"]
-            if file_path.exists():
-                entry["note_content"] = file_path.read_text(encoding="utf-8")
-            else:
-                entry["note_content"] = None
+            entry["note_content"] = note_content
 
         output.append(entry)
 
@@ -753,15 +777,15 @@ def search_notes_graph(
         **filters
     )
 
-    # Fetch file content for any neighbors added via expand
-    if include_content:
-        for r in reranked:
-            if "note_content" not in r:
-                file_path = Path(NOTES_DIR) / r["filename"]
-                if file_path.exists():
-                    r["note_content"] = file_path.read_text(encoding="utf-8")
-                else:
-                    r["note_content"] = None
+    for r in reranked:
+        # Load content_summary always, note_content only if requested
+        content_summary, note_content = load_note_frontmatter(
+            r["filename"], include_content=include_content
+        )
+
+        r["content_summary"] = content_summary
+        if include_content:
+            r["note_content"] = note_content
 
     # Convert neighbor links UUIDs to filenames for CLI
     for r in reranked:

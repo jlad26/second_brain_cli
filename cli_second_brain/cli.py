@@ -44,6 +44,34 @@ def embed(
 # ==========================
 # SEARCH
 # ==========================
+
+def format_note_output(note: dict) -> dict:
+    """
+    Reorder CLI JSON output for readability:
+    - filename, uuid, score
+    - type, status, tags
+    - content_summary
+    - links
+    - note_content (optional)
+    """
+    output = {
+        "filename": note.get("filename"),
+        "uuid": note.get("uuid"),
+        "score": note.get("score"),
+        "type": note.get("type"),
+        "status": note.get("status"),
+        "tags": note.get("tags"),
+        "content_summary": note.get("content_summary"),
+        "links": note.get("links"),
+    }
+
+    # Include full content at the end if present
+    if "note_content" in note:
+        output["note_content"] = note["note_content"]
+
+    return output
+
+
 @app.command(help="Search notes by semantic similarity with optional filters. Set --top-k 0 to return all results.")
 def search(
     query: str = typer.Argument(None, help="Search query (leave empty to filter only)"),
@@ -69,7 +97,8 @@ def search(
         tags=tags,
         include_content=include_content
     )
-    typer.echo(json.dumps(matches, indent=2))
+    formatted = [format_note_output(n) for n in matches]
+    typer.echo(json.dumps(formatted, indent=2)) 
 
 
 @app.command(name="search-graph", help="Graph-boosted semantic search with optional filters. Set --top-k 0 to return all results.")
@@ -101,7 +130,8 @@ def search_graph(
         folder=folder,
         tags=tags
     )
-    typer.echo(json.dumps(matches, indent=2))
+    formatted = [format_note_output(n) for n in matches]
+    typer.echo(json.dumps(formatted, indent=2))
 
 
 @app.command(help="Show graph neighbors (links + backlinks) of a note by relative path")
@@ -129,7 +159,8 @@ def neighbors(
         type_filter=type_filter,
         include_content=include_content
     )
-    typer.echo(json.dumps(results, indent=2))
+    formatted = [format_note_output(n) if isinstance(n, dict) else {"filename": n} for n in results]
+    typer.echo(json.dumps(formatted, indent=2))
 
 
 @app.command(help="Find notes by exact filename")
