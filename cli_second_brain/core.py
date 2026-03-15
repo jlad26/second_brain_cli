@@ -620,17 +620,15 @@ def get_neighbors_by_relative_path(
 ):
     """
     Return graph neighbors (links + backlinks) for a note identified
-    by its relative path (folder/filename). Can include note content.
+    by its relative path (folder/filename). Includes metadata and optionally full content.
 
-    Args:
-        relative_path: string like "Interests/Artificial Intelligence"
-        status: optional list of note statuses to filter neighbors
-        type_filter: optional list of note types to filter neighbors
-        include_content: if True, include the full note content
+    Returns:
+        list[dict]: Each neighbor has filename, uuid, type, status, tags, links, content_summary,
+                    and optionally note_content.
     """
     from pathlib import Path
 
-    # Ensure relative path has .md extension
+    # Ensure .md extension
     path_obj = Path(relative_path)
     if path_obj.suffix != ".md":
         path_obj = path_obj.with_suffix(".md")
@@ -644,40 +642,48 @@ def get_neighbors_by_relative_path(
         ),
         limit=1
     )
-
     if not points or not points[0].payload:
         return []
 
     note_uuid = points[0].payload["uuid"]
 
     # Fetch neighbors with optional status filter
-    neighbors = get_graph_neighbors(note_uuid, status=status, folder=None, tags=None, limit=None)
+    neighbors_uuids = get_graph_neighbors(note_uuid, status=status, folder=None, tags=None, limit=None)
 
-    # Filter neighbors by type(s) if provided
+    # Filter by type if provided
     if type_filter:
         filtered_neighbors = []
-        points = qdrant.retrieve(collection_name=COLLECTION_NAME, ids=neighbors)
+        points = qdrant.retrieve(collection_name=COLLECTION_NAME, ids=neighbors_uuids)
         for p in points:
             if p.payload and p.payload.get("type") in type_filter:
                 filtered_neighbors.append(p.payload["uuid"])
-        neighbors = filtered_neighbors
+        neighbors_uuids = filtered_neighbors
 
-    # Convert UUIDs → filenames
-    neighbor_filenames = resolve_uuids_to_filenames(neighbors)
+    # Retrieve full payloads
+    neighbor_points = qdrant.retrieve(collection_name=COLLECTION_NAME, ids=neighbors_uuids)
 
-    if include_content:
-        output = []
-        for uid, fname in zip(neighbors, neighbor_filenames):
-            file_path = Path(NOTES_DIR) / fname
-            note_content = file_path.read_text(encoding="utf-8") if file_path.exists() else None
-            output.append({
-                "filename": fname,
-                "uuid": uid,
-                "note_content": note_content
-            })
-        return output
+    output = []
+    for p in neighbor_points:
+        if not p.payload:
+            continue
+        fname = p.payload.get("filename")
+        if not fname:  # skip points without a filename
+            continue
+        content_summary, note_content = load_note_frontmatter(fname, include_content=include_content)
+        neighbor_entry = {
+            "filename": fname,
+            "uuid": p.payload.get("uuid"),
+            "type": p.payload.get("type"),
+            "status": p.payload.get("status"),
+            "tags": p.payload.get("tags", []),
+            "links": resolve_uuids_to_filenames(p.payload.get("links", [])),
+            "content_summary": content_summary
+        }
+        if include_content:
+            neighbor_entry["note_content"] = note_content
+        output.append(neighbor_entry)
 
-    return neighbor_filenames
+    return output
 
 def graph_rerank(
     results, 

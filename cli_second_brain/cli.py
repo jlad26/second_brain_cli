@@ -153,13 +153,16 @@ def neighbors(
     Retrieve graph neighbors for a note identified by relative path
     (folder/filename) with optional status/type filters and note content.
     """
-    results = get_neighbors_by_relative_path(
+    # Get neighbor metadata + content
+    neighbors_data = get_neighbors_by_relative_path(
         relative_path,
         status=status,
         type_filter=type_filter,
         include_content=include_content
     )
-    formatted = [format_note_output(n) if isinstance(n, dict) else {"filename": n} for n in results]
+
+    # Use the same output formatting as search
+    formatted = [format_note_output(n) for n in neighbors_data]
     typer.echo(json.dumps(formatted, indent=2))
 
 
