@@ -1,6 +1,7 @@
 import typer
 import os
 import json
+from typing import Optional
 
 from cli_second_brain.core import (
     delete_collection,
@@ -179,17 +180,17 @@ def filename(
 # LINKS / BACKLINKS / GRAPH
 # ==========================
 @app.command(help="Show all outgoing links from a note")
-def links(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
+def links(note: str, status: Optional[list[str]] = None, folder: Optional[list[str]] = None, tags: Optional[list[str]] = None):
     typer.echo(json.dumps(get_links(note, status=status, folder=folder, tags=tags), indent=2))
 
 
 @app.command(help="Show all backlinks to a note")
-def backlinks(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
+def backlinks(note: str, status: Optional[list[str]] = None, folder: Optional[list[str]] = None, tags: Optional[list[str]] = None):
     typer.echo(json.dumps(get_backlinks(note, status=status, folder=folder, tags=tags), indent=2))
 
 
 @app.command(help="Show both links and backlinks for a note")
-def graph(note: str, status: list[str] = None, folder: list[str] = None, tags: list[str] = None):
+def graph(note: str, status: Optional[list[str]] = None, folder: Optional[list[str]] = None, tags: Optional[list[str]] = None):
     typer.echo(json.dumps(get_connected(note, status=status, folder=folder, tags=tags), indent=2))
 
 
