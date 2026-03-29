@@ -81,7 +81,7 @@ def search(
     ),
     min_score: float | None = typer.Option(
         None,
-        help="Minimum similarity score (default from SB_DEFAULT_SEACRH_MIN_SCORE)"
+        help="Minimum similarity score (default from SB_DEFAULT_SEARCH_MIN_SCORE)"
     ),
     status: list[str] = typer.Option(None, help="Filter by note status (can provide multiple)"),
     folder: list[str] = typer.Option(None, help="Filter by folder(s) of the notes"),
