@@ -430,22 +430,58 @@ def embed_all_notes(batch_size=BATCH_SIZE, force_update=False):
 # FILTER BUILDER
 # ==========================
 
-def build_filter(type_filter=None, status=None, folder=None, tags=None):
-    conditions = []
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
+
+def build_filter(status=None, folder=None, tags=None):
+    must_conditions = []
+
+    # status: OR logic inside
     if status:
-        conditions.append(FieldCondition(key="status", match=MatchValue(value=status[0])) if len(status) == 1 else None)
-    if type_filter:
-        conditions.append(FieldCondition(key="type", match=MatchValue(value=type_filter)))
-    if folder:
-        conditions.append(FieldCondition(key="folder", match=MatchValue(value=folder[0])) if len(folder) == 1 else None)
-    if tags:
-        conditions.append(FieldCondition(key="tags", match=MatchValue(value=tags[0])) if len(tags) == 1 else None)
+        must_conditions.append(
+            Filter(
+                should=[
+                    FieldCondition(
+                        key="status",
+                        match=MatchValue(value=s)
+                    )
+                    for s in status
+                ]
+            )
+        )
 
-    conditions = [c for c in conditions if c is not None]
-    if not conditions:
+    # folder: OR logic inside
+    if folder:
+        must_conditions.append(
+            Filter(
+                should=[
+                    FieldCondition(
+                        key="folder",
+                        match=MatchValue(value=f)
+                    )
+                    for f in folder
+                ]
+            )
+        )
+
+    # tags: OR logic inside
+    if tags:
+        must_conditions.append(
+            Filter(
+                should=[
+                    FieldCondition(
+                        key="tags",
+                        match=MatchValue(value=t)
+                    )
+                    for t in tags
+                ]
+            )
+        )
+
+    if not must_conditions:
         return None
-    return Filter(must=conditions)
+
+    return Filter(must=must_conditions)
 
 
 # ==========================
